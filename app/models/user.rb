@@ -14,64 +14,43 @@ class User < ActiveRecord::Base
 # https://github.com/plataformatec/devise/wiki/OmniAuth:-Overview
 # for facebook followed https://github.com/mkdynamic/omniauth-facebook
 
-  def self.new_with_session(params, session)
-    super.tap do |user|
-      if data = session["devise.facebook_data"] && session["devise.facebook_data"]["extra"]["raw_info"]
-        user.email = data["email"]
+  def self.from_omniauth(auth)  #For All Provider Common Method
+    where(auth.slice(:provider, :uid)).first_or_create do |user|  #Find or Create User
+      user.provider = auth.provider
+      user.uid = auth.uid
+      user.user_name = auth.info.nickname
+      if auth.provider == "twitter"  # twitter do not return First & Last name it return only Name.
+        name = auth.info.name.split
+        user.first_name = name[0]
+        user.last_name = name[1]
+      else
+        user.email = auth.info.email  #we get email from Facebook & Linkedin API response.
+        user.first_name = auth.info.first_name
+        user.last_name = auth.info.last_name
       end
     end
   end
 
-
-  def self.find_for_facebook_oauth(access_token, signed_in_resource=nil)
-    data = access_token.extra.raw_info
-    puts "##############   #{data.inspect}"
-    if user = self.find_by_email(data.email)
-      user.confirm! unless user.confirmed?
-      user
-    else # Create a user with a stub password.
-      user = User.new(:email => data.email, :password => Devise.friendly_token[0,20], :type => 'social')
-      user.skip_confirmation!
-      user.save!
-      user
-    end
-  end
-
-  def self.find_for_twitter_oauth(access_token, signed_in_resource=nil)
-    data = access_token.extra.raw_info
-    puts "##############   #{data.inspect}"
-    if user = self.find_by_twitter_uid(data.id)
-      user
-    else # Create a user with a stub password.
-      puts "In Else"
-      #self.create!(:email => data.email, :password => Devise.friendly_token[0,20])
-      User.new
-    end
-  end
-
-  def self.find_for_linkedin_oauth(access_token, signed_in_resource=nil)
-    data = access_token.extra.raw_info
-    puts "##############   #{data.inspect}"
-    if user = self.find_by_linkedin_uid(data.id)
-      user
-    else # Create a user with a stub password.
-      puts "In Else"
-      #self.create!(:email => data.email, :password => Devise.friendly_token[0,20])
-      User.new
-    end
-  end
-
-  def self.find_for_open_id(access_token, signed_in_resource=nil)
-    data = access_token.info
-    puts "##############   #{data.inspect}"
-    if user = User.where(:email => data["email"]).first
-      user.confirm! unless user.confirmed?
-      user
+  def self.new_with_session(params, session)
+    if session["devise.user_attributes"]
+      new(session["devise.user_attributes"], without_protection: true) do |user|
+        user.attributes = params
+        user.valid?
+      end
     else
-      user = User.new(:email =>  data["email"], :password => Devise.friendly_token[0,20], :type => 'social')
-      user.skip_confirmation!
-      user.save!
-      user
+      super
+    end
+  end
+
+  def password_required? # Define for Omniauth, Initially Password is Blank.
+    super && provider.blank?
+  end
+
+  def update_with_password(params, *options)  # Define for Change Password.
+    if encrypted_password.blank?
+      update_attributes(params, *options)
+    else
+      super
     end
   end
 
